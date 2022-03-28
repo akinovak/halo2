@@ -313,12 +313,33 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
 // ANCHOR_END: circuit
 
 fn main() {
-    use halo2_proofs::{dev::MockProver, pairing::bn256::Fr as Fp};
+    use halo2_proofs::{
+        dev::MockProver, 
+        poly::commitment::{Params, ParamsVerifier},
+        pairing::bn256::{Bn256, Fr as Fp, G1Affine},
+    };
+    let k = 4;
+
+    let params: Params<G1Affine> = Params::<G1Affine>::unsafe_setup::<Bn256>(k);
+    let params_verifier: ParamsVerifier<Bn256> = params.verifier(3).unwrap();
+
+    // let default = G1Affine::default();
+    // println!("{:?}", default.x);
+    // println!("{:?}", default.y);
+
+    let exported = params_verifier.export_g_lagrange();
+    assert_eq!(Ok(()), exported);
+
+    // for base in g_lagrange {
+    //     // let curve_point = base.to_curve();
+    //     // println!("{:?}", curve_point);
+    //     println!("{:?}", base.x);
+    // }
+
 
     // ANCHOR: test-circuit
     // The number of rows in our circuit cannot exceed 2^k. Since our example
     // circuit is very small, we can pick a very small value here.
-    let k = 4;
 
     // Prepare the private and public inputs to the circuit!
     let constant = Fp::from(7);

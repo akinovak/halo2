@@ -501,10 +501,14 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
         let c = field_chip.load_private(layouter.namespace(|| "load c"), self.c)?;
 
         // Use `add_and_mul` to get `d = (a + b) * c`.
-        let d = field_chip.add_and_mul(&mut layouter, a, b, c)?;
+        let d = field_chip.add_and_mul(&mut layouter, a.clone(), b.clone(), c.clone())?;
+        let e = field_chip.add_and_mul(&mut layouter, a.clone(), c.clone(), b.clone())?;
+        let f = field_chip.add_and_mul(&mut layouter, b, c, a)?;
 
         // Expose the result as a public input to the circuit.
-        field_chip.expose_public(layouter.namespace(|| "expose d"), d, 0)
+        field_chip.expose_public(layouter.namespace(|| "expose d"), d, 0)?;
+        field_chip.expose_public(layouter.namespace(|| "expose e"), e, 1)?;
+        field_chip.expose_public(layouter.namespace(|| "expose f"), f, 2)
     }
 }
 // ANCHOR_END: circuit
@@ -512,14 +516,18 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
 #[allow(clippy::many_single_char_names)]
 fn main() {
     use group::ff::Field;
-    use halo2_proofs::dev::MockProver;
-    use pairing::bn256::Fr as Fp;
+    use halo2_proofs::{
+        dev::MockProver,
+        pairing::bn256::{Bn256, Fr as Fp, G1Affine},
+        poly::commitment::{Params, ParamsVerifier},
+        plonk::{commit_to_flattened_instance, keygen_pk, keygen_vk},
+    };
     use rand_core::OsRng;
 
     // ANCHOR: test-circuit
     // The number of rows in our circuit cannot exceed 2^k. Since our example
     // circuit is very small, we can pick a very small value here.
-    let k = 4;
+    let k = 5;
 
     // Prepare the private and public inputs to the circuit!
     let rng = OsRng;
@@ -527,6 +535,8 @@ fn main() {
     let b = Fp::random(rng);
     let c = Fp::random(rng);
     let d = (a + b) * c;
+    let e = (a + c) * b;
+    let f = (b + c) * a;
 
     // Instantiate the circuit with the private inputs.
     let circuit = MyCircuit {
@@ -537,7 +547,7 @@ fn main() {
 
     // Arrange the public input. We expose the multiplication result in row 0
     // of the instance column, so we position it there in our public inputs.
-    let mut public_inputs = vec![d];
+    let mut public_inputs = vec![d, e, f];
 
     // Given the correct public input, our circuit will verify.
     let prover = MockProver::run(k, &circuit, vec![public_inputs.clone()]).unwrap();
@@ -548,4 +558,20 @@ fn main() {
     let prover = MockProver::run(k, &circuit, vec![public_inputs]).unwrap();
     assert!(prover.verify().is_err());
     // ANCHOR_END: test-circuit
+
+    let params: Params<G1Affine> = Params::<G1Affine>::unsafe_setup::<Bn256>(k);
+    let params_verifier: ParamsVerifier<Bn256> = params.verifier(3).unwrap();
+
+    let exported = params_verifier.export_g_lagrange();
+    assert!(exported.is_ok());
+
+    let empty_circuit: MyCircuit<Fp> = MyCircuit { a: None, b: None, c: None };
+    let vk = keygen_vk(&params, &empty_circuit).expect("keygen_vk should not fail");
+
+    let pk = keygen_pk(&params, vk, &empty_circuit).expect("keygen_pk should not fail");
+    let public_inputs = vec![d, e, f];
+
+    let commitment = commit_to_flattened_instance(&[&[&public_inputs.as_slice()]], &params, &pk);
+    println!("p_i: {:?}", public_inputs);
+    println!("instance_commitment: {:?}", commitment);
 }

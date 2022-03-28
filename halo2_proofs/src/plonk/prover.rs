@@ -27,6 +27,57 @@ use crate::{
     transcript::{EncodedChallenge, TranscriptWrite},
 };
 
+/// Fold array of multiple instances for each proof in one big instance
+fn flatten_instances
+    <C: CurveAffine>
+(
+    instances: &[&[&[C::Scalar]]]
+) -> Vec<C::Scalar> {
+
+    let instances = instances.iter()
+        .map(|instace| {
+            let instance_vec = instace.iter().
+                map(|values| {
+                    values.to_vec()
+                }).collect::<Vec<_>>();
+
+            instance_vec.into_iter().flatten().collect::<Vec<_>>()
+        }).collect::<Vec<_>>();
+
+    instances.into_iter().flatten().collect::<Vec<_>>()
+}
+
+/// Commits to flatten instance
+pub fn commit_to_flattened_instance
+<
+    C: CurveAffine,
+>(
+    instances: &[&[&[C::Scalar]]],
+    params: &Params<C>,
+    pk: &ProvingKey<C>,
+) -> Result<C, Error> {
+
+    let flatten_instance_lagrange = flatten_instances::<C>(instances);
+    let domain = &pk.vk.domain;
+    let mut poly = domain.empty_lagrange();
+    assert_eq!(poly.len(), params.n as usize);
+
+    let meta = &pk.vk.cs;
+
+    if flatten_instance_lagrange.len() > (poly.len() - (meta.blinding_factors() + 1)) {
+        return Err(Error::InstanceTooLarge);
+    }
+
+    for (poly, value) in poly.iter_mut().zip(flatten_instance_lagrange.iter()) {
+        *poly = *value;
+    }
+
+    let instance_commitment_projective = params.commit_lagrange(&poly);
+    let instance_commitment = instance_commitment_projective.to_affine();
+
+    Ok(instance_commitment)
+}
+
 /// This creates a proof for the provided `circuit` when given the public
 /// parameters `params` and the proving key [`ProvingKey`] that was
 /// generated previously for the same circuit. The provided `instances`

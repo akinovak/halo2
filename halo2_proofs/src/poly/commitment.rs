@@ -17,6 +17,10 @@ use std::ops::{Add, AddAssign, Mul, MulAssign};
 
 use std::io;
 
+use std::fs::{self, File};
+use std::io::prelude::*;
+use std::io::LineWriter;
+
 /// These are the prover parameters for the polynomial commitment scheme.
 #[derive(Debug)]
 pub struct Params<C: CurveAffine> {
@@ -333,6 +337,49 @@ impl<E: Engine> ParamsVerifier<E> {
             s_g2,
             g_lagrange,
         })
+    }
+
+    /// Exports g_lagrange to solidity for instance verification
+    pub fn export_g_lagrange(&self) -> std::io::Result<()> {
+        let header = 
+        b"//SPDX-License-Identifier: Unlicense\npragma solidity ^0.8.0;\n\nimport \"./BN254.sol\";\n\ncontract Constants {\n\tusing BN254 for *;\n\n\tuint256[][] G_LAGRANGE = [\n";
+        let closing = b"\t];\n}\n";
+
+        let file = File::create("Constants.sol")?;
+        let mut file = LineWriter::new(file);
+
+        file.write_all(header)?;
+
+        for i in 0..self.public_inputs_size() - 1 {
+            file.write_all(b"\t\t[\n")?;
+            
+            let coords = self.g_lagrange[i].coordinates().unwrap();
+
+            let s = format!("\t\t\tuint256({:?}),\n", coords.x());
+            file.write_all(s.as_bytes())?;
+
+            let s = format!("\t\t\tuint256({:?})\n", coords.y());
+            file.write_all(s.as_bytes())?;
+
+            file.write_all(b"\t\t],\n")?;
+        }
+
+        file.write_all(b"\t\t[\n")?;
+
+        let coords = self.g_lagrange[self.public_inputs_size() - 1].coordinates().unwrap();
+
+        let s = format!("\t\t\tuint256({:?}),\n", coords.x());
+        file.write_all(s.as_bytes())?;
+
+        let s = format!("\t\t\tuint256({:?})\n", coords.y());
+        file.write_all(s.as_bytes())?;
+
+        file.write_all(b"\t\t]\n")?;
+
+        file.write_all(closing)?;
+        file.flush()?;
+
+        Ok(())
     }
 }
 
